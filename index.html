@@ -386,7 +386,7 @@
     let lobbyLang = 'zh';
 
     const battle = {
-      peer: { bestRank: null, guessCount: 0, won: false, name: '模拟玩家' },
+      peer: { bestRank: null, bestAccuracy: null, guessCount: 0, won: false, name: '模拟玩家' },
       botUsedWords: new Set(),
       botTimer: null,
       botCandidates: [],
@@ -478,18 +478,42 @@
     function lookupRank(word) {
       const db = getActiveDatabase();
       if (Object.prototype.hasOwnProperty.call(db, word)) {
-        return { rank: db[word], isUnknown: false };
+        const rank = db[word];
+        return { rank, isUnknown: false, accuracy: accuracyFromRank(rank) };
       }
-      return { rank: randomInt(CONFIG.unknownMin, CONFIG.unknownMax), isUnknown: true };
+      // 词库外：内部用最差排名排序，展示 0%～5% 随机准确率（两位小数）
+      return { rank: CONFIG.maxRank, isUnknown: true, accuracy: randomUnknownAccuracy() };
     }
 
-    function barPercent(rank) {
-      if (rank == null) return 8;
-      const pct = Math.max(8, Math.round((1 - (rank - 1) / (CONFIG.maxRank - 1)) * 100));
-      return Math.min(100, pct);
+    /** 排名 → 准确率（1.00%～100.00%，两位小数） */
+    function accuracyFromRank(rank) {
+      const raw = (1 - (rank - 1) / (CONFIG.maxRank - 1)) * 99 + 1;
+      return Math.round(Math.max(1, Math.min(100, raw)) * 100) / 100;
     }
 
-    function barColorClass(rank) {
+    /** 词库外：0.00%～5.00% 随机（两位小数） */
+    function randomUnknownAccuracy() {
+      return Math.floor(Math.random() * 501) / 100;
+    }
+
+    function formatAccuracy(acc) {
+      return `${Number(acc).toFixed(2)}%`;
+    }
+
+    /** 猜测列表排序：准确率高的靠前（含词库外 0%～5% 按数值大小） */
+    function compareGuessCloseness(a, b) {
+      const byAcc = b.accuracy - a.accuracy;
+      if (byAcc !== 0) return byAcc;
+      return a.rank - b.rank;
+    }
+
+    /** 进度条宽度与准确率一致（略设下限便于看见极冷词） */
+    function barWidthFromAccuracy(acc) {
+      return Math.max(4, Math.min(100, acc));
+    }
+
+    function barColorClass(rank, isUnknown) {
+      if (isUnknown) return 'bg-red-400 opacity-80';
       if (rank === 1) return 'bg-emerald-500';
       if (rank < 100) return 'bg-green-500';
       if (rank <= 500) return 'bg-amber-400';
@@ -608,7 +632,8 @@
     }
 
     function resetBattlePeer() {
-      battle.peer = { bestRank: null, guessCount: 0, won: false };
+      const name = battle.peer?.name || '模拟玩家';
+      battle.peer = { bestRank: null, bestAccuracy: null, guessCount: 0, won: false, name };
       battle.botUsedWords = new Set();
       const db = getActiveDatabase();
       const target = getTargetWord();
@@ -645,11 +670,12 @@
       toastTimer = setTimeout(hideFloatingToast, duration);
     }
 
-    function showGuessToast(word, rank, isUnknown) {
+    function showGuessToast(word, accuracy, isUnknown) {
+      const accLabel = formatAccuracy(accuracy);
       const main =
         '<div class="flex flex-wrap items-baseline justify-center gap-x-3 gap-y-1">' +
         `<span class="text-xl font-bold">${escapeHtml(word)}</span>` +
-        `<span class="font-mono text-2xl font-bold tabular-nums text-indigo-100">#${rank}</span></div>`;
+        `<span class="font-mono text-2xl font-bold tabular-nums text-indigo-100">${accLabel}</span></div>`;
       const sub = isUnknown ? `<div class="mt-1.5 text-sm text-indigo-100">${escapeHtml(t('farAway'))}</div>` : '';
       showFloatingToast(main + sub, 'guess', 2000);
     }
@@ -663,25 +689,28 @@
     }
 
     // ========== 对战进度条 ==========
-    function getSelfBestRank() {
+    function getSelfBestGuess() {
       if (!guesses.length) return null;
-      return Math.min(...guesses.map((g) => g.rank));
+      return [...guesses].sort(compareGuessCloseness)[0];
     }
 
     function renderBattleProgress() {
       if (gameMode !== 'battle') return;
-      const selfBest = getSelfBestRank();
-      const peerBest = battle.peer.bestRank;
+      const selfBestG = getSelfBestGuess();
+      const selfAcc = selfBestG ? selfBestG.accuracy : null;
+      const peerAcc = battle.peer.bestAccuracy;
 
-      document.getElementById('self-progress-bar').style.width = `${barPercent(selfBest)}%`;
-      document.getElementById('peer-progress-bar').style.width = `${barPercent(peerBest)}%`;
+      document.getElementById('self-progress-bar').style.width =
+        `${selfAcc == null ? 8 : barWidthFromAccuracy(selfAcc)}%`;
+      document.getElementById('peer-progress-bar').style.width =
+        `${peerAcc == null ? 8 : barWidthFromAccuracy(peerAcc)}%`;
 
-      const selfText = selfBest == null
+      const selfText = selfAcc == null
         ? (activeLang === 'zh' ? '最佳 — · ' : 'Best — · ') + `${guesses.length} ` + (activeLang === 'zh' ? '次' : 'tries')
-        : (activeLang === 'zh' ? `最佳 #${selfBest} · ${guesses.length} 次` : `Best #${selfBest} · ${guesses.length} tries`);
-      const peerText = peerBest == null
+        : (activeLang === 'zh' ? `最佳 ${formatAccuracy(selfAcc)} · ${guesses.length} 次` : `Best ${formatAccuracy(selfAcc)} · ${guesses.length} tries`);
+      const peerText = peerAcc == null
         ? (activeLang === 'zh' ? '最佳 — · ' : 'Best — · ') + `${battle.peer.guessCount} ` + (activeLang === 'zh' ? '次' : 'tries')
-        : (activeLang === 'zh' ? `最佳 #${peerBest} · ${battle.peer.guessCount} 次` : `Best #${peerBest} · ${battle.peer.guessCount} tries`);
+        : (activeLang === 'zh' ? `最佳 ${formatAccuracy(peerAcc)} · ${battle.peer.guessCount} 次` : `Best ${formatAccuracy(peerAcc)} · ${battle.peer.guessCount} tries`);
 
       document.getElementById('self-progress-text').textContent = selfText;
       document.getElementById('peer-progress-text').textContent = peerText;
@@ -709,18 +738,20 @@
       if (gameEnded || gameMode !== 'battle') return;
       const word = pickBotWord();
       battle.botUsedWords.add(word);
-      const { rank } = lookupRank(word);
+      const { rank, accuracy } = lookupRank(word);
       const prevBest = battle.peer.bestRank;
       battle.peer.guessCount += 1;
       if (battle.peer.bestRank == null || rank < battle.peer.bestRank) {
         battle.peer.bestRank = rank;
+        battle.peer.bestAccuracy = accuracy;
       }
       renderBattleProgress();
       if (prevBest != null && battle.peer.bestRank < prevBest) {
+        const peerAccHint = formatAccuracy(battle.peer.bestAccuracy);
         showPeerHint(
           activeLang === 'zh'
-            ? `对手更接近了 · 当前最佳 #${battle.peer.bestRank}`
-            : `Opponent got closer · best #${battle.peer.bestRank}`
+            ? `对手更接近了 · 当前最佳 ${peerAccHint}`
+            : `Opponent got closer · best ${peerAccHint}`
         );
       }
       if (rank === 1) {
@@ -756,10 +787,11 @@
         guessList.appendChild(li);
         return;
       }
-      const sorted = [...guesses].sort((a, b) => a.rank - b.rank);
+      const sorted = [...guesses].sort(compareGuessCloseness);
       guessList.innerHTML = '';
       sorted.forEach((g) => {
-        const pct = barPercent(g.rank);
+        const acc = g.accuracy;
+        const pct = barWidthFromAccuracy(acc);
         const li = document.createElement('li');
         li.setAttribute('data-guess-id', String(g.id));
         li.className =
@@ -767,7 +799,7 @@
           (g.rank === 1 ? ' win-row border-emerald-400' : '') +
           (g.id === lastGuessId ? ' guess-row-highlight' : '');
         const bar = document.createElement('div');
-        bar.className = `absolute inset-y-0 left-0 transition-all duration-500 ${barColorClass(g.rank)}`;
+        bar.className = `absolute inset-y-0 left-0 transition-all duration-500 ${barColorClass(g.rank, g.isUnknown)}`;
         bar.style.width = `${pct}%`;
         const content = document.createElement('div');
         content.className = 'relative z-10 flex items-center justify-between gap-2 px-3 py-2.5';
@@ -779,8 +811,8 @@
           wordSpan.textContent = g.word;
         }
         const rankSpan = document.createElement('span');
-        rankSpan.className = 'shrink-0 font-mono text-sm tabular-nums text-slate-600';
-        rankSpan.textContent = `#${g.rank}`;
+        rankSpan.className = 'shrink-0 font-mono text-sm font-semibold tabular-nums text-slate-600';
+        rankSpan.textContent = formatAccuracy(acc);
         content.appendChild(wordSpan);
         content.appendChild(rankSpan);
         li.appendChild(bar);
@@ -848,15 +880,15 @@
         return;
       }
 
-      const { rank, isUnknown } = lookupRank(word);
+      const { rank, isUnknown, accuracy } = lookupRank(word);
       const guessId = Date.now();
-      guesses.push({ word, rank, id: guessId });
+      guesses.push({ word, rank, id: guessId, isUnknown, accuracy });
       lastGuessId = guessId;
       clearTimeout(highlightTimer);
       highlightTimer = setTimeout(() => { lastGuessId = null; }, 1000);
 
       renderGuessList();
-      showGuessToast(word, rank, isUnknown);
+      showGuessToast(word, accuracy, isUnknown);
       guessInput.value = '';
       if (!gameEnded) guessInput.focus();
 

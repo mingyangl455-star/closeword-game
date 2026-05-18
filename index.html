@@ -4,332 +4,491 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>CloseWord</title>
-  <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Font Awesome CDN -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
   <style>
-    /* 避免 iOS 输入框聚焦时自动放大 */
-    input[type="text"] {
-      font-size: 16px;
-    }
-    /* 胜利行轻微脉冲 */
+    input[type="text"] { font-size: 16px; }
+    #guess-list { -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
     @keyframes winPulse {
       0%, 100% { transform: scale(1); }
       50% { transform: scale(1.02); }
     }
-    .win-row {
-      animation: winPulse 1.2s ease-in-out infinite;
-    }
-    /* Toast 弹入（内层缩放，不影响 fixed 居中） */
+    .win-row { animation: winPulse 1.2s ease-in-out infinite; }
     @keyframes toastPop {
       from { opacity: 0; transform: scale(0.82); }
       to { opacity: 1; transform: scale(1); }
     }
-    .toast-pop-inner {
-      animation: toastPop 0.32s cubic-bezier(0.34, 1.45, 0.64, 1) forwards;
-    }
-    .toast-show {
-      animation: none;
-    }
-    @keyframes toastOut {
-      from { opacity: 1; }
-      to { opacity: 0; }
-    }
-    .toast-hide {
-      animation: toastOut 0.2s ease-in forwards;
-    }
-    /* 新猜测行高亮 */
+    .toast-pop-inner { animation: toastPop 0.32s cubic-bezier(0.34, 1.45, 0.64, 1) forwards; }
+    .toast-show { animation: none; }
+    @keyframes toastOut { from { opacity: 1; } to { opacity: 0; } }
+    .toast-hide { animation: toastOut 0.2s ease-in forwards; }
     @keyframes rowHighlight {
-      0% {
-        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.55);
-        transform: scale(1.015);
-      }
-      100% {
-        box-shadow: 0 0 0 0 transparent;
-        transform: scale(1);
-      }
+      0% { box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.55); transform: scale(1.015); }
+      100% { box-shadow: 0 0 0 0 transparent; transform: scale(1); }
     }
     .guess-row-highlight {
       animation: rowHighlight 1s ease-out;
       border-color: rgb(99 102 241) !important;
       z-index: 1;
     }
-    /* 猜测列表：固定可视高度，框内滚动 */
-    #guess-list {
-      -webkit-overflow-scrolling: touch;
-      overscroll-behavior: contain;
+    #confetti-canvas { pointer-events: none; }
+    .screen { display: none; }
+    .screen.active { display: flex; }
+    /* 主页头图：透明底 PNG，与浅色背景自然融合 */
+    .home-hero {
+      background: transparent;
+      filter: drop-shadow(0 12px 24px rgba(99, 102, 241, 0.18));
     }
-    /* Confetti 画布置于最底层 */
-    #confetti-canvas {
-      pointer-events: none;
+    .home-hero img {
+      display: block;
+      max-height: 11rem;
     }
   </style>
 </head>
 <body class="box-border flex h-[100dvh] flex-col overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800 pb-[env(safe-area-inset-bottom)]">
 
-  <!-- 浮动 Toast（不占文档流，避免挤压布局） -->
   <div id="toast" class="pointer-events-none fixed left-1/2 z-30 hidden w-[min(88vw,20rem)] -translate-x-1/2 rounded-xl px-5 py-3 text-center text-base font-semibold shadow-2xl" role="alert" style="bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));"></div>
-
-  <!-- Confetti 全屏画布 -->
   <canvas id="confetti-canvas" class="fixed inset-0 z-40 w-full h-full"></canvas>
 
-  <!-- 全屏胜利层 -->
-  <div id="win-overlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 backdrop-blur-sm px-4" aria-hidden="true">
+  <!-- 结算层 -->
+  <div id="result-overlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 backdrop-blur-sm px-4" aria-hidden="true">
     <div class="relative w-full max-w-sm rounded-2xl bg-white p-8 text-center shadow-2xl">
-      <div class="mb-4 text-5xl text-amber-400">
-        <i class="fa-solid fa-trophy"></i>
+      <div id="result-icon" class="mb-4 text-5xl"></div>
+      <h2 id="result-title" class="mb-2 text-2xl font-bold"></h2>
+      <p id="result-secret" class="mb-2 text-lg font-semibold text-indigo-600"></p>
+      <p id="result-stats" class="mb-6 text-slate-600"></p>
+      <div class="flex flex-col gap-2">
+        <button id="result-replay-btn" type="button" class="h-12 w-full rounded-xl bg-emerald-500 text-lg font-semibold text-white shadow-lg transition active:scale-95 hover:bg-emerald-600"></button>
+        <button id="result-home-btn" type="button" class="h-12 w-full rounded-xl border border-slate-200 bg-white text-lg font-semibold text-slate-700 transition active:scale-95 hover:bg-slate-50">返回主页</button>
       </div>
-      <h2 id="win-title" class="mb-2 text-2xl font-bold text-emerald-600" data-i18n="winTitle">You got it!</h2>
-      <p id="win-stats" class="mb-6 text-slate-600"></p>
-      <button id="play-again-btn" type="button" class="h-12 w-full rounded-xl bg-emerald-500 text-lg font-semibold text-white shadow-lg transition active:scale-95 hover:bg-emerald-600" data-i18n="playAgain">
-        Play again
-      </button>
     </div>
   </div>
 
-  <main class="relative z-10 mx-auto flex h-full min-h-0 w-full max-w-lg flex-col px-4 py-6">
+  <div id="app" class="relative z-10 mx-auto flex h-full min-h-0 w-full max-w-lg flex-col">
 
-    <!-- 顶栏：标题 + 语言切换 -->
-    <header class="mb-4 shrink-0">
-      <div class="mb-3 flex items-center justify-between">
-        <h1 class="flex items-center gap-2 text-2xl font-bold tracking-tight">
-          <i class="fa-solid fa-puzzle-piece text-indigo-500"></i>
-          <span data-i18n="title">CloseWord</span>
-        </h1>
-        <!-- 语言切换 EN / 中文 -->
-        <div class="flex rounded-full bg-slate-200 p-1 text-sm font-medium" role="group" aria-label="Language">
-          <button type="button" id="lang-en" class="lang-btn rounded-full px-3 py-1.5 transition active:scale-95 bg-white text-indigo-600 shadow-sm" data-lang="en">EN</button>
-          <button type="button" id="lang-zh" class="lang-btn rounded-full px-3 py-1.5 transition active:scale-95 text-slate-600" data-lang="zh">中文</button>
+    <!-- 主页 -->
+    <div id="screen-home" class="screen active min-h-0 flex-1 flex-col justify-center px-4 py-8">
+      <div class="mb-8 text-center">
+        <div class="home-hero mx-auto mb-4 flex w-full max-w-[18rem] items-center justify-center">
+          <img
+            src="assets/hero-mascot.png"
+            alt="CloseWord 探险猜词"
+            class="h-auto w-full object-contain"
+            width="288"
+            height="288"
+            decoding="async"
+          />
         </div>
+        <h1 class="text-3xl font-bold tracking-tight">CloseWord</h1>
+        <p class="mt-2 text-slate-600">猜词挑战</p>
       </div>
-      <p class="text-sm leading-relaxed text-slate-600" data-i18n="subtitle">
-        Guess the secret word. Each guess shows how close you are in meaning.
-      </p>
-    </header>
-
-    <!-- 输入区 -->
-    <section class="mb-4 shrink-0">
-      <form id="guess-form" class="flex gap-2" autocomplete="off">
-        <input
-          id="guess-input"
-          type="text"
-          class="h-12 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-lg shadow-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200"
-          placeholder="Type a word..."
-          enterkeyhint="go"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck="false"
-        />
-        <button
-          type="submit"
-          id="guess-btn"
-          class="flex h-12 shrink-0 items-center gap-2 rounded-xl bg-indigo-500 px-5 text-lg font-semibold text-white shadow-md transition active:scale-95 hover:bg-indigo-600"
-        >
-          <i class="fa-solid fa-arrow-right"></i>
-          <span data-i18n="guessBtn">Guess</span>
+      <div class="space-y-4">
+        <button type="button" id="btn-solo" class="flex w-full items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-md transition active:scale-[0.98] hover:border-indigo-300">
+          <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600"><i class="fa-solid fa-user text-xl"></i></div>
+          <div>
+            <div class="font-bold text-lg">单人游戏</div>
+            <div class="text-sm text-slate-500">练习模式，查看完整猜测记录</div>
+          </div>
+          <i class="fa-solid fa-chevron-right ml-auto text-slate-400"></i>
         </button>
-      </form>
-    </section>
+        <button type="button" id="btn-battle" class="flex w-full items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-md transition active:scale-[0.98] hover:border-rose-300">
+          <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-rose-100 text-rose-600"><i class="fa-solid fa-users text-xl"></i></div>
+          <div>
+            <div class="font-bold text-lg">好友对战</div>
+            <div class="text-sm text-slate-500">和好友比拼，先猜中者胜！</div>
+          </div>
+          <i class="fa-solid fa-chevron-right ml-auto text-slate-400"></i>
+        </button>
+      </div>
+    </div>
 
-    <!-- 历史猜测列表：撑满剩余屏幕高度，超出仅在框内滚动 -->
-    <section id="guess-history" class="flex min-h-0 flex-1 flex-col">
-      <h2 class="mb-2 flex shrink-0 items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
-        <i class="fa-solid fa-list-ol"></i>
-        <span data-i18n="historyTitle">Guesses</span>
-        <span id="guess-count" class="ml-auto font-normal normal-case text-slate-400">0</span>
-      </h2>
-      <ul id="guess-list" class="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
-        <!-- 由 JS 动态渲染 -->
-        <li id="empty-hint" class="rounded-lg border border-dashed border-slate-300 py-8 text-center text-sm text-slate-400" data-i18n="emptyHint">
-          No guesses yet. Start typing!
-        </li>
-      </ul>
-    </section>
+    <!-- 单人：选语言 -->
+    <div id="screen-solo-lang" class="screen min-h-0 flex-1 flex-col px-4 py-6">
+      <button type="button" class="nav-back mb-4 flex items-center gap-1 text-sm text-slate-500" data-target="home"><i class="fa-solid fa-arrow-left"></i> 返回</button>
+      <h2 class="mb-2 text-2xl font-bold">选择词库语言</h2>
+      <p class="mb-6 text-sm text-slate-600">开局后不可更换语言 · 每局随机一个神秘词</p>
+      <div class="space-y-3">
+        <button type="button" class="solo-lang-pick flex w-full items-center justify-between rounded-xl border-2 border-slate-200 bg-white px-5 py-4 font-semibold transition hover:border-indigo-400" data-lang="en">
+          <span>English</span><span class="text-sm font-normal text-slate-500"></span>
+        </button>
+        <button type="button" class="solo-lang-pick flex w-full items-center justify-between rounded-xl border-2 border-slate-200 bg-white px-5 py-4 font-semibold transition hover:border-indigo-400" data-lang="zh">
+          <span>中文</span><span class="text-sm font-normal text-slate-500"></span>
+        </button>
+      </div>
+    </div>
 
-  </main>
+    <!-- 对战大厅 -->
+    <div id="screen-lobby" class="screen min-h-0 flex-1 flex-col px-4 py-6">
+      <button type="button" class="nav-back mb-4 flex items-center gap-1 text-sm text-slate-500" data-target="home"><i class="fa-solid fa-arrow-left"></i> 返回</button>
+      <h2 class="mb-2 text-2xl font-bold">好友对战</h2>
+      <p class="mb-4 text-sm text-slate-600">Phase 1：模拟对手自动陪玩</p>
+      <button
+        type="button"
+        id="btn-invite-friends"
+        class="mb-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50 text-base font-semibold text-indigo-700 transition active:scale-[0.98] hover:border-indigo-400 hover:bg-indigo-100"
+      >
+        <i class="fa-solid fa-user-plus"></i>
+        邀请好友
+      </button>
+      <div id="invited-friends-section" class="mb-4 hidden">
+        <p class="mb-2 text-xs font-medium text-slate-500">已邀请的好友</p>
+        <div id="invited-friends-list" class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200"></div>
+      </div>
+      <p class="mb-2 text-sm font-medium text-slate-600">选择词库（房主）</p>
+      <div class="mb-6 flex rounded-full bg-slate-200 p-1 text-sm font-medium">
+        <button type="button" id="lobby-lang-en" class="lobby-lang-btn flex-1 rounded-full py-2 transition">EN</button>
+        <button type="button" id="lobby-lang-zh" class="lobby-lang-btn flex-1 rounded-full py-2 transition">中文</button>
+      </div>
+      <div class="mb-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
+        <p><i class="fa-solid fa-robot mr-1 text-rose-500"></i> 对手：<strong>模拟玩家</strong></p>
+        <p class="mt-2">仅可见对方最佳排名与次数，不可见具体词语。对手猜中后立即结束并公布答案。</p>
+      </div>
+      <button type="button" id="btn-start-battle" class="mt-auto h-12 w-full rounded-xl bg-rose-500 text-lg font-semibold text-white shadow-lg transition active:scale-95 hover:bg-rose-600">
+        开始对战
+      </button>
+    </div>
+
+    <!-- 游戏局内（单人 / 对战共用） -->
+    <div id="screen-game" class="screen min-h-0 flex-1 flex-col px-4 py-6">
+      <header class="mb-3 shrink-0">
+        <div class="mb-2 flex items-center justify-between">
+          <button type="button" id="game-back-btn" class="flex items-center gap-1 text-sm text-slate-500"><i class="fa-solid fa-arrow-left"></i> 退出</button>
+          <span id="game-mode-badge" class="rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-semibold text-indigo-700">单人</span>
+        </div>
+        <h1 class="flex items-center gap-2 text-xl font-bold">
+          <i class="fa-solid fa-puzzle-piece text-indigo-500"></i> CloseWord
+        </h1>
+        <p id="game-subtitle" class="mt-1 text-sm text-slate-600"></p>
+      </header>
+
+      <!-- 对战：对手进度（不展示具体词） -->
+      <section id="battle-panel" class="mb-3 hidden shrink-0 space-y-2 rounded-xl border border-rose-200 bg-white p-3 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <i class="fa-solid fa-chart-line mr-1"></i>对局进度
+        </p>
+        <!-- 你 -->
+        <div class="relative overflow-hidden rounded-lg border border-indigo-200 bg-slate-50 py-2 pl-3 pr-2">
+          <div id="self-progress-bar" class="absolute inset-y-0 left-0 bg-indigo-400/35 transition-all duration-500" style="width:8%"></div>
+          <div class="relative flex items-center justify-between text-sm">
+            <span class="font-semibold text-indigo-700"><i class="fa-solid fa-user mr-1"></i>你</span>
+            <span id="self-progress-text" class="font-mono text-xs tabular-nums text-slate-600">最佳 — · 0 次</span>
+          </div>
+        </div>
+        <!-- 对手 -->
+        <div class="relative overflow-hidden rounded-lg border border-rose-200 bg-slate-50 py-2 pl-3 pr-2">
+          <div id="peer-progress-bar" class="absolute inset-y-0 left-0 bg-rose-400/35 transition-all duration-500" style="width:8%"></div>
+          <div class="relative flex items-center justify-between text-sm">
+            <span id="peer-name-label" class="font-semibold text-rose-700"><i class="fa-solid fa-robot mr-1"></i>对手</span>
+            <span id="peer-progress-text" class="font-mono text-xs tabular-nums text-slate-600">最佳 — · 0 次</span>
+          </div>
+        </div>
+        <p id="peer-hint" class="hidden text-center text-xs font-medium text-rose-600"></p>
+      </section>
+
+      <section class="mb-3 shrink-0">
+        <form id="guess-form" class="flex gap-2" autocomplete="off">
+          <input id="guess-input" type="text" class="h-12 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-4 text-lg shadow-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200" placeholder="输入一个词…" enterkeyhint="go" autocapitalize="off" autocorrect="off" spellcheck="false" />
+          <button type="submit" id="guess-btn" class="flex h-12 shrink-0 items-center gap-2 rounded-xl bg-indigo-500 px-5 text-lg font-semibold text-white shadow-md transition active:scale-95 hover:bg-indigo-600">
+            <i class="fa-solid fa-arrow-right"></i><span id="guess-btn-label">猜测</span>
+          </button>
+        </form>
+      </section>
+
+      <section id="guess-history" class="flex min-h-0 flex-1 flex-col">
+        <h2 class="mb-2 flex shrink-0 items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          <i class="fa-solid fa-list-ol"></i>
+          <span id="history-title">我的猜测</span>
+          <span id="guess-count" class="ml-auto font-normal normal-case text-slate-400">0</span>
+        </h2>
+        <ul id="guess-list" class="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1"></ul>
+      </section>
+    </div>
+
+  </div>
 
   <script>
-    // ========== 全局配置 ==========
-    const CONFIG = {
-      maxRank: 5000,
-      unknownMin: 2000,
-      unknownMax: 5000,
-    };
+    // ========== 配置与词库 ==========
+    const CONFIG = { maxRank: 5000, unknownMin: 2000, unknownMax: 5000 };
 
-    // ========== 英文 Mock 词库（排名越小越接近目标 coffee） ==========
-    const wordDatabaseEn = {
-      coffee: 1,
-      espresso: 2,
-      latte: 5,
-      tea: 12,
-      milk: 18,
-      water: 25,
-      drink: 35,
-      cafe: 40,
-      morning: 55,
-      beans: 60,
-      cup: 75,
-      energy: 90,
-      sugar: 110,
-      breakfast: 130,
-      apple: 500,
-      car: 1200,
-      dog: 2500,
-      computer: 4000,
-    };
+    /**
+     * 多主题词库：每个主题含 target（本局答案，rank=1）与 words（排名表）
+     * 开局时随机抽一个主题作为本局神秘词
+     */
+    const PUZZLES_EN = [
+      {
+        theme: 'Beverages',
+        target: 'coffee',
+        words: {
+          coffee: 1, espresso: 2, cappuccino: 3, latte: 5, mocha: 8, americano: 10,
+          tea: 12, cocoa: 15, milk: 18, caffeine: 22, water: 25, drink: 35,
+          cafe: 40, barista: 48, morning: 55, beans: 60, roast: 68, cup: 75,
+          aroma: 82, energy: 90, sugar: 110, breakfast: 130, bitter: 145,
+          kitchen: 280, fruit: 420, apple: 500, office: 900, car: 1200, dog: 2500,
+        },
+      },
+      {
+        theme: 'Pets',
+        target: 'dog',
+        words: {
+          dog: 1, puppy: 2, canine: 3, pet: 5, bark: 8, wag: 10, leash: 14,
+          cat: 18, animal: 28, fur: 38, walk: 45, vet: 55, bone: 65, loyal: 72,
+          friend: 85, home: 110, park: 140, training: 180, food: 220, bed: 260,
+          fish: 450, bird: 480, horse: 620, car: 1100, phone: 1800, ocean: 3200,
+        },
+      },
+      {
+        theme: 'Ocean',
+        target: 'beach',
+        words: {
+          beach: 1, sand: 3, shore: 5, wave: 8, ocean: 10, sea: 12, coast: 15,
+          sun: 18, swim: 25, surf: 32, shell: 40, tide: 48, salt: 55, summer: 65,
+          vacation: 85, island: 110, palm: 130, boat: 160, fish: 200, coral: 240,
+          mountain: 550, forest: 680, city: 950, snow: 1400, desert: 2100,
+        },
+      },
+      {
+        theme: 'Music',
+        target: 'music',
+        words: {
+          music: 1, song: 3, melody: 5, rhythm: 8, beat: 10, tune: 12, sing: 15,
+          guitar: 20, piano: 25, drum: 30, band: 38, concert: 48, listen: 58,
+          dance: 72, voice: 85, radio: 100, headphones: 120, artist: 140, album: 165,
+          movie: 380, book: 450, sport: 620, cooking: 780, math: 1500,
+        },
+      },
+      {
+        theme: 'Weather',
+        target: 'rain',
+        words: {
+          rain: 1, rainy: 2, drizzle: 5, storm: 8, cloud: 12, wet: 15, drop: 18,
+          umbrella: 25, puddle: 32, thunder: 40, wind: 48, gray: 55, cold: 65,
+          weather: 75, flood: 95, snow: 120, sun: 150, dry: 180, season: 220,
+          jacket: 280, beach: 450, desert: 680, fire: 920, mountain: 1300,
+        },
+      },
+      {
+        theme: 'Reading',
+        target: 'book',
+        words: {
+          book: 1, novel: 3, page: 5, read: 8, story: 10, chapter: 14, author: 18,
+          library: 25, paper: 32, word: 38, text: 45, knowledge: 55, learn: 68,
+          school: 85, pen: 100, write: 115, fiction: 130, poetry: 155, magazine: 180,
+          movie: 320, music: 400, phone: 650, game: 880, sports: 1100,
+        },
+      },
+    ];
 
-    // ========== 中文 Mock 词库（目标词：咖啡） ==========
-    const wordDatabaseZh = {
-      咖啡: 1,
-      浓缩咖啡: 2,
-      拿铁: 5,
-      茶: 12,
-      牛奶: 18,
-      水: 25,
-      饮料: 35,
-      咖啡馆: 40,
-      早晨: 55,
-      咖啡豆: 60,
-      杯子: 75,
-      能量: 90,
-      糖: 110,
-      早餐: 130,
-      苹果: 500,
-      汽车: 1200,
-      狗: 2500,
-      电脑: 4000,
-    };
+    const PUZZLES_ZH = [
+      {
+        theme: '饮品',
+        target: '咖啡',
+        words: {
+          咖啡: 1, 浓缩咖啡: 2, 卡布奇诺: 3, 拿铁: 5, 摩卡: 8, 美式: 10,
+          茶: 12, 可可: 15, 牛奶: 18, 咖啡因: 22, 水: 25, 饮料: 35,
+          咖啡馆: 40, 咖啡师: 48, 早晨: 55, 咖啡豆: 60, 烘焙: 68, 杯子: 75,
+          香气: 82, 能量: 90, 糖: 110, 早餐: 130, 苦: 145, 苦味的: 150,
+          厨房: 280, 水果: 420, 苹果: 500, 办公室: 900, 汽车: 1200, 狗: 2500,
+        },
+      },
+      {
+        theme: '宠物',
+        target: '狗',
+        words: {
+          狗: 1, 小狗: 2, 犬: 3, 宠物: 5, 吠: 8, 尾巴: 10, 牵引绳: 14,
+          猫: 18, 动物: 28, 毛: 38, 散步: 45, 兽医: 55, 骨头: 65, 忠诚: 72,
+          朋友: 85, 家: 110, 公园: 140, 训练: 180, 狗粮: 220, 狗窝: 260,
+          鱼: 450, 鸟: 480, 马: 620, 汽车: 1100, 手机: 1800, 海洋: 3200,
+        },
+      },
+      {
+        theme: '海洋',
+        target: '海滩',
+        words: {
+          海滩: 1, 沙: 3, 海岸: 5, 浪: 8, 海洋: 10, 大海: 12, 海边: 15,
+          太阳: 18, 游泳: 25, 冲浪: 32, 贝壳: 40, 潮汐: 48, 盐: 55, 夏天: 65,
+          度假: 85, 岛: 110, 棕榈: 130, 船: 160, 鱼: 200, 珊瑚: 240,
+          山: 550, 森林: 680, 城市: 950, 雪: 1400, 沙漠: 2100,
+        },
+      },
+      {
+        theme: '音乐',
+        target: '音乐',
+        words: {
+          音乐: 1, 歌曲: 3, 旋律: 5, 节奏: 8, 节拍: 10, 曲调: 12, 唱: 15,
+          吉他: 20, 钢琴: 25, 鼓: 30, 乐队: 38, 演唱会: 48, 听: 58,
+          跳舞: 72, 声音: 85, 广播: 100, 耳机: 120, 歌手: 140, 专辑: 165,
+          电影: 380, 书: 450, 运动: 620, 烹饪: 780, 数学: 1500,
+        },
+      },
+      {
+        theme: '天气',
+        target: '雨',
+        words: {
+          雨: 1, 下雨: 2, 毛毛雨: 5, 暴风雨: 8, 云: 12, 湿: 15, 雨滴: 18,
+          伞: 25, 水坑: 32, 雷: 40, 风: 48, 阴: 55, 冷: 65,
+          天气: 75, 洪水: 95, 雪: 120, 晴: 150, 干: 180, 季节: 220,
+          外套: 280, 海滩: 450, 沙漠: 680, 火: 920, 山: 1300,
+        },
+      },
+      {
+        theme: '阅读',
+        target: '书',
+        words: {
+          书: 1, 小说: 3, 页: 5, 读: 8, 故事: 10, 章节: 14, 作者: 18,
+          图书馆: 25, 纸: 32, 字: 38, 文字: 45, 知识: 55, 学习: 68,
+          学校: 85, 笔: 100, 写: 115, 童话: 130, 诗歌: 155, 杂志: 180,
+          电影: 320, 音乐: 400, 手机: 650, 游戏: 880, 运动: 1100,
+        },
+      },
+    ];
 
-    // ========== 国际化文案 ==========
+    /** 当前局：随机选中的主题与词表 */
+    let currentPuzzle = null;
+
     const I18N = {
       en: {
-        title: 'CloseWord',
         subtitle: 'Guess the secret word. Each guess shows how close you are in meaning.',
-        guessBtn: 'Guess',
-        placeholder: 'Type a word...',
-        farAway: 'That word is far away.',
-        duplicate: 'Already guessed.',
-        langRequired: 'Please enter an English word.',
-        winTitle: 'You got it!',
-        winStats: (total, best) => `Guesses: ${total} · Best rank: #${best}`,
-        playAgain: 'Play again',
-        historyTitle: 'Guesses',
+        guessBtn: 'Guess', placeholder: 'Type a word...', farAway: 'That word is far away.',
+        duplicate: 'Already guessed.', langRequired: 'Please enter an English word.',
         emptyHint: 'No guesses yet. Start typing!',
+        winTitle: 'You got it!', winStats: (n, b) => `Guesses: ${n} · Best rank: #${b}`,
+        battleWinTitle: 'You win!', battleLoseTitle: 'Opponent wins!',
+        battleWinStats: (n) => `You guessed ${n} times`,
+        battleLoseStats: (n) => `You guessed ${n} times · Opponent was faster`,
+        secretLabel: 'The word was',
+        replaySolo: 'Play again', replayBattle: 'Rematch',
       },
       zh: {
-        title: 'CloseWord',
-        subtitle: '猜出今天的神秘单词，系统会告诉你猜的词在含义上离目标有多近。',
-        guessBtn: '猜测',
-        placeholder: '输入一个词…',
-        farAway: '该词较远',
-        duplicate: '已经猜过了',
-        langRequired: '请输入中文词语',
-        winTitle: '恭喜通关！',
-        winStats: (total, best) => `共猜测 ${total} 次 · 最佳排名 #${best}`,
-        playAgain: '再玩一次',
-        historyTitle: '猜测记录',
+        subtitle: '猜出神秘单词，数值越小表示含义越接近。',
+        guessBtn: '猜测', placeholder: '输入一个词…', farAway: '该词较远',
+        duplicate: '已经猜过了', langRequired: '请输入中文词语',
         emptyHint: '还没有猜测，开始输入吧！',
+        winTitle: '恭喜通关！', winStats: (n, b) => `共猜测 ${n} 次 · 最佳排名 #${b}`,
+        battleWinTitle: '你赢了！', battleLoseTitle: '对手猜中了！',
+        battleWinStats: (n) => `你共猜测 ${n} 次`,
+        battleLoseStats: (n) => `你共猜测 ${n} 次 · 对手更快`,
+        secretLabel: '答案是',
+        replaySolo: '再玩一次', replayBattle: '再来一局',
       },
     };
 
-    // ========== 游戏状态 ==========
-    let activeLang = 'en';
+    // ========== 应用状态 ==========
+    let activeLang = 'zh';
+    let gameMode = 'solo'; // solo | battle
     let guesses = [];
-    let gameWon = false;
+    let gameEnded = false;
+    let lastGuessId = null;
     let toastTimer = null;
     let toastHideTimer = null;
-    let lastGuessId = null;
     let highlightTimer = null;
     let confettiAnimId = null;
     let confettiParticles = [];
+    let lobbyLang = 'zh';
 
-    /** 浮动 Toast 基础样式（fixed，不参与文档排版） */
+    const battle = {
+      peer: { bestRank: null, guessCount: 0, won: false, name: '模拟玩家' },
+      botUsedWords: new Set(),
+      botTimer: null,
+      botCandidates: [],
+    };
+
+    /** 演示：可邀请的好友（仅一位，随机抽选） */
+    const MOCK_FRIENDS_POOL = [
+      { id: 'f1', name: '小明', bg: 'from-sky-400 to-blue-500', fastestGuessSec: 42, battlesThisMonth: 18 },
+      { id: 'f2', name: '阿花', bg: 'from-pink-400 to-rose-500', fastestGuessSec: 35, battlesThisMonth: 26 },
+      { id: 'bot', name: '模拟玩家', bg: 'from-violet-400 to-indigo-600', fastestGuessSec: 28, battlesThisMonth: 31 },
+    ];
+    let invitedFriend = null;
+
     const TOAST_BASE_CLASS =
       'pointer-events-none fixed left-1/2 z-30 w-[min(88vw,20rem)] -translate-x-1/2 rounded-xl px-5 py-3 text-center text-base font-semibold shadow-2xl';
 
-    // ========== DOM 引用 ==========
+    // ========== DOM ==========
+    const screens = {
+      home: document.getElementById('screen-home'),
+      soloLang: document.getElementById('screen-solo-lang'),
+      lobby: document.getElementById('screen-lobby'),
+      game: document.getElementById('screen-game'),
+    };
     const guessForm = document.getElementById('guess-form');
     const guessInput = document.getElementById('guess-input');
     const guessList = document.getElementById('guess-list');
-    const emptyHint = document.getElementById('empty-hint');
     const guessCountEl = document.getElementById('guess-count');
     const toastEl = document.getElementById('toast');
-    const winOverlay = document.getElementById('win-overlay');
-    const winStatsEl = document.getElementById('win-stats');
-    const playAgainBtn = document.getElementById('play-again-btn');
+    const resultOverlay = document.getElementById('result-overlay');
+    const resultIcon = document.getElementById('result-icon');
+    const resultTitle = document.getElementById('result-title');
+    const resultSecret = document.getElementById('result-secret');
+    const resultStats = document.getElementById('result-stats');
+    const resultReplayBtn = document.getElementById('result-replay-btn');
+    const resultHomeBtn = document.getElementById('result-home-btn');
+    const battlePanel = document.getElementById('battle-panel');
     const confettiCanvas = document.getElementById('confetti-canvas');
     const confettiCtx = confettiCanvas.getContext('2d');
-    const langEnBtn = document.getElementById('lang-en');
-    const langZhBtn = document.getElementById('lang-zh');
+    const gameModeBadge = document.getElementById('game-mode-badge');
+    const gameSubtitle = document.getElementById('game-subtitle');
+    const historyTitle = document.getElementById('history-title');
+    const guessBtnLabel = document.getElementById('guess-btn-label');
+    const invitedFriendsSection = document.getElementById('invited-friends-section');
+    const invitedFriendsList = document.getElementById('invited-friends-list');
+    const btnInviteFriends = document.getElementById('btn-invite-friends');
+    const btnStartBattle = document.getElementById('btn-start-battle');
+    const peerHint = document.getElementById('peer-hint');
 
-    // ========== 工具函数 ==========
-
-    /** 获取当前语言文案 */
     function t(key, ...args) {
       const entry = I18N[activeLang][key];
       return typeof entry === 'function' ? entry(...args) : entry;
     }
 
-    /** 获取当前词库 */
+    /** 从当前语言的主题池中随机抽取本局神秘词 */
+    function pickRandomPuzzle() {
+      const pool = activeLang === 'en' ? PUZZLES_EN : PUZZLES_ZH;
+      const picked = pool[randomInt(0, pool.length - 1)];
+      currentPuzzle = {
+        target: picked.target,
+        theme: picked.theme,
+        words: { ...picked.words },
+      };
+    }
+
     function getActiveDatabase() {
-      return activeLang === 'en' ? wordDatabaseEn : wordDatabaseZh;
+      return currentPuzzle ? currentPuzzle.words : {};
     }
 
-    /** 获取本局目标词 */
     function getTargetWord() {
-      return activeLang === 'en' ? 'coffee' : '咖啡';
+      return currentPuzzle ? currentPuzzle.target : '';
     }
 
-    /** 标准化玩家输入 */
     function normalize(raw) {
       const trimmed = raw.trim();
       if (!trimmed) return '';
       return activeLang === 'en' ? trimmed.toLowerCase() : trimmed;
     }
 
-    /** 英文模式：仅允许拉丁字母 */
-    function isEnglishWord(word) {
-      return /^[a-z]+$/.test(word);
-    }
-
-    /** 中文模式：仅允许汉字 */
-    function isChineseWord(word) {
-      return /^[\u4e00-\u9fff]+$/.test(word);
-    }
-
-    /** 按当前语言模式校验输入 */
+    function isEnglishWord(word) { return /^[a-z]+$/.test(word); }
+    function isChineseWord(word) { return /^[\u4e00-\u9fff]+$/.test(word); }
     function isValidInputForLang(word) {
       return activeLang === 'en' ? isEnglishWord(word) : isChineseWord(word);
     }
 
-    /** 闭区间随机整数 */
     function randomInt(min, max) {
       return Math.floor(Math.random() * (max - min + 1)) + min;
     }
 
-    /** 查询排名：词库命中用固定值，否则随机 2000–5000 */
     function lookupRank(word) {
       const db = getActiveDatabase();
       if (Object.prototype.hasOwnProperty.call(db, word)) {
         return { rank: db[word], isUnknown: false };
       }
-      return {
-        rank: randomInt(CONFIG.unknownMin, CONFIG.unknownMax),
-        isUnknown: true,
-      };
+      return { rank: randomInt(CONFIG.unknownMin, CONFIG.unknownMax), isUnknown: true };
     }
 
-    /** 根据排名计算进度条宽度百分比 */
     function barPercent(rank) {
-      const pct = Math.max(
-        8,
-        Math.round((1 - (rank - 1) / (CONFIG.maxRank - 1)) * 100)
-      );
+      if (rank == null) return 8;
+      const pct = Math.max(8, Math.round((1 - (rank - 1) / (CONFIG.maxRank - 1)) * 100));
       return Math.min(100, pct);
     }
 
-    /** 根据排名返回进度条 Tailwind 背景色类 */
     function barColorClass(rank) {
       if (rank === 1) return 'bg-emerald-500';
       if (rank < 100) return 'bg-green-500';
@@ -337,7 +496,129 @@
       return 'bg-red-400 opacity-80';
     }
 
-    /** 隐藏浮动 Toast（带淡出） */
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // ========== 邀请好友（演示） ==========
+    function resetInvitedFriends() {
+      invitedFriend = null;
+      invitedFriendsSection.classList.add('hidden');
+      invitedFriendsList.innerHTML = '';
+      btnInviteFriends.disabled = false;
+      btnInviteFriends.classList.remove('opacity-60');
+      updateStartBattleButton();
+    }
+
+    /** 长条展示：头像 + 昵称 + 最快猜中 + 本月对战（仅一位好友） */
+    function renderInvitedFriends() {
+      if (!invitedFriend) {
+        invitedFriendsList.innerHTML = '';
+        return;
+      }
+      const f = invitedFriend;
+      const initial = f.name.slice(0, 1);
+      invitedFriendsList.innerHTML =
+        '<div class="flex items-center gap-3 bg-gradient-to-r from-indigo-50/90 to-white px-4 py-3">' +
+        `<div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br ${f.bg} text-lg font-bold text-white shadow-md ring-2 ring-white">${escapeHtml(initial)}</div>` +
+        '<div class="min-w-0 flex-1 text-left">' +
+        `<p class="truncate text-base font-semibold text-slate-800">${escapeHtml(f.name)}</p>` +
+        '<p class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">' +
+        `<span><i class="fa-solid fa-bolt mr-1 text-amber-500"></i>最快猜中 <strong class="font-semibold text-slate-700">${f.fastestGuessSec}</strong> 秒</span>` +
+        `<span><i class="fa-solid fa-calendar-days mr-1 text-indigo-500"></i>本月对战 <strong class="font-semibold text-slate-700">${f.battlesThisMonth}</strong> 场</span>` +
+        '</p></div></div>';
+    }
+
+    function inviteFriendsDemo() {
+      if (invitedFriend) return;
+      invitedFriend = { ...MOCK_FRIENDS_POOL[randomInt(0, MOCK_FRIENDS_POOL.length - 1)] };
+      invitedFriendsSection.classList.remove('hidden');
+      renderInvitedFriends();
+      btnInviteFriends.disabled = true;
+      btnInviteFriends.classList.add('opacity-60');
+      btnInviteFriends.innerHTML = '<i class="fa-solid fa-check mr-1"></i> 已邀请';
+      updateStartBattleButton();
+      showFloatingToast(
+        `<span class="text-base font-bold">已向 ${escapeHtml(invitedFriend.name)} 发送邀请</span>`,
+        'duplicate',
+        2000
+      );
+    }
+
+    function updateStartBattleButton() {
+      const ready = invitedFriend != null;
+      btnStartBattle.disabled = !ready;
+      btnStartBattle.classList.toggle('opacity-50', !ready);
+      btnStartBattle.classList.toggle('cursor-not-allowed', !ready);
+    }
+
+    // ========== 导航 ==========
+    function showScreen(name) {
+      Object.values(screens).forEach((el) => el.classList.remove('active'));
+      screens[name]?.classList.add('active');
+    }
+
+    function goHome() {
+      stopBattleBot();
+      hideResultOverlay();
+      stopConfetti();
+      showScreen('home');
+    }
+
+    function applyGameCopy() {
+      gameSubtitle.textContent = t('subtitle');
+      guessInput.placeholder = t('placeholder');
+      guessBtnLabel.textContent = t('guessBtn');
+      historyTitle.textContent = gameMode === 'battle' ? (activeLang === 'zh' ? '我的猜测' : 'My guesses') : (activeLang === 'zh' ? '猜测记录' : 'Guesses');
+      gameModeBadge.textContent = gameMode === 'battle' ? (activeLang === 'zh' ? '对战' : 'Battle') : (activeLang === 'zh' ? '单人' : 'Solo');
+      gameModeBadge.className =
+        'rounded-full px-2.5 py-0.5 text-xs font-semibold ' +
+        (gameMode === 'battle' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700');
+      battlePanel.classList.toggle('hidden', gameMode !== 'battle');
+    }
+
+    function startSoloGame(lang) {
+      activeLang = lang;
+      gameMode = 'solo';
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      resetRound();
+      applyGameCopy();
+      showScreen('game');
+      guessInput.focus();
+    }
+
+    function startBattleGame(lang) {
+      if (!invitedFriend) return;
+      activeLang = lang;
+      gameMode = 'battle';
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      battle.peer.name = invitedFriend.name;
+      const peerLabel = document.getElementById('peer-name-label');
+      if (peerLabel) {
+        peerLabel.innerHTML = `<i class="fa-solid fa-user mr-1"></i>${escapeHtml(battle.peer.name)}`;
+      }
+      resetRound();
+      resetBattlePeer();
+      applyGameCopy();
+      showScreen('game');
+      startBattleBot();
+      guessInput.focus();
+    }
+
+    function resetBattlePeer() {
+      battle.peer = { bestRank: null, guessCount: 0, won: false };
+      battle.botUsedWords = new Set();
+      const db = getActiveDatabase();
+      const target = getTargetWord();
+      battle.botCandidates = Object.keys(db)
+        .filter((w) => w !== target)
+        .sort((a, b) => db[a] - db[b]);
+      renderBattleProgress();
+    }
+
+    // ========== Toast ==========
     function hideFloatingToast() {
       toastEl.classList.remove('toast-show');
       toastEl.classList.add('toast-hide');
@@ -345,16 +626,9 @@
       toastHideTimer = setTimeout(() => {
         toastEl.classList.add('hidden');
         toastEl.classList.remove('toast-hide');
-        toastEl.innerHTML = '';
       }, 200);
     }
 
-    /**
-     * 显示浮动 Toast（不占文档流）
-     * @param {string} html - 内容 HTML
-     * @param {'guess'|'duplicate'|'lang'} variant - 样式变体
-     * @param {number} duration - 显示毫秒数
-     */
     function showFloatingToast(html, variant, duration = 2000) {
       clearTimeout(toastTimer);
       clearTimeout(toastHideTimer);
@@ -364,7 +638,6 @@
           ? 'bg-indigo-600 text-white ring-4 ring-indigo-300/60 shadow-indigo-950/50'
           : 'bg-amber-50 text-amber-900 ring-2 ring-amber-300 shadow-amber-200/80';
       toastEl.className = `${TOAST_BASE_CLASS} ${variantClass} toast-show`;
-      toastEl.style.bottom = 'calc(5.5rem + env(safe-area-inset-bottom, 0px))';
       const wrap = document.createElement('div');
       wrap.className = 'toast-pop-inner';
       wrap.innerHTML = html;
@@ -372,154 +645,204 @@
       toastTimer = setTimeout(hideFloatingToast, duration);
     }
 
-    /** 每次成功猜测：展示词 + 排名，未知词附带「较远」副文案 */
     function showGuessToast(word, rank, isUnknown) {
       const main =
         '<div class="flex flex-wrap items-baseline justify-center gap-x-3 gap-y-1">' +
-        `<span class="text-xl font-bold tracking-tight">${escapeHtml(word)}</span>` +
-        `<span class="font-mono text-2xl font-bold tabular-nums text-indigo-100">#${rank}</span>` +
-        '</div>';
-      const sub = isUnknown
-        ? `<div class="mt-1.5 text-sm font-medium text-indigo-100">${escapeHtml(t('farAway'))}</div>`
-        : '';
+        `<span class="text-xl font-bold">${escapeHtml(word)}</span>` +
+        `<span class="font-mono text-2xl font-bold tabular-nums text-indigo-100">#${rank}</span></div>`;
+      const sub = isUnknown ? `<div class="mt-1.5 text-sm text-indigo-100">${escapeHtml(t('farAway'))}</div>` : '';
       showFloatingToast(main + sub, 'guess', 2000);
     }
 
-    /** 重复猜测提示 */
     function showDuplicateToast() {
-      showFloatingToast(
-        `<span class="text-lg font-bold">${escapeHtml(t('duplicate'))}</span>`,
-        'duplicate',
-        2000
-      );
+      showFloatingToast(`<span class="text-lg font-bold">${escapeHtml(t('duplicate'))}</span>`, 'duplicate', 2000);
     }
 
-    /** 语言不符提示（中文模式需中文，英文模式需英文） */
     function showLangRequiredToast() {
-      showFloatingToast(
-        `<span class="text-lg font-bold">${escapeHtml(t('langRequired'))}</span>`,
-        'lang',
-        2000
-      );
+      showFloatingToast(`<span class="text-lg font-bold">${escapeHtml(t('langRequired'))}</span>`, 'duplicate', 2000);
     }
 
-    /** 刷新所有 data-i18n 节点文案 */
-    function applyI18n() {
-      document.querySelectorAll('[data-i18n]').forEach((el) => {
-        const key = el.getAttribute('data-i18n');
-        if (I18N[activeLang][key] && typeof I18N[activeLang][key] !== 'function') {
-          el.textContent = I18N[activeLang][key];
+    // ========== 对战进度条 ==========
+    function getSelfBestRank() {
+      if (!guesses.length) return null;
+      return Math.min(...guesses.map((g) => g.rank));
+    }
+
+    function renderBattleProgress() {
+      if (gameMode !== 'battle') return;
+      const selfBest = getSelfBestRank();
+      const peerBest = battle.peer.bestRank;
+
+      document.getElementById('self-progress-bar').style.width = `${barPercent(selfBest)}%`;
+      document.getElementById('peer-progress-bar').style.width = `${barPercent(peerBest)}%`;
+
+      const selfText = selfBest == null
+        ? (activeLang === 'zh' ? '最佳 — · ' : 'Best — · ') + `${guesses.length} ` + (activeLang === 'zh' ? '次' : 'tries')
+        : (activeLang === 'zh' ? `最佳 #${selfBest} · ${guesses.length} 次` : `Best #${selfBest} · ${guesses.length} tries`);
+      const peerText = peerBest == null
+        ? (activeLang === 'zh' ? '最佳 — · ' : 'Best — · ') + `${battle.peer.guessCount} ` + (activeLang === 'zh' ? '次' : 'tries')
+        : (activeLang === 'zh' ? `最佳 #${peerBest} · ${battle.peer.guessCount} 次` : `Best #${peerBest} · ${battle.peer.guessCount} tries`);
+
+      document.getElementById('self-progress-text').textContent = selfText;
+      document.getElementById('peer-progress-text').textContent = peerText;
+    }
+
+    function showPeerHint(msg) {
+      peerHint.textContent = msg;
+      peerHint.classList.remove('hidden');
+      clearTimeout(showPeerHint._timer);
+      showPeerHint._timer = setTimeout(() => peerHint.classList.add('hidden'), 2500);
+    }
+
+    // ========== 模拟对手 ==========
+    function pickBotWord() {
+      const target = getTargetWord();
+      const remaining = battle.botCandidates.filter((w) => !battle.botUsedWords.has(w));
+      // 约 12% 概率直接猜答案（加快结束）
+      if (Math.random() < 0.12 || remaining.length === 0) return target;
+      if (Math.random() < 0.65 && remaining.length) return remaining[0];
+      if (remaining.length) return remaining[randomInt(0, Math.min(remaining.length - 1, 5))];
+      return target;
+    }
+
+    function botSubmitGuess() {
+      if (gameEnded || gameMode !== 'battle') return;
+      const word = pickBotWord();
+      battle.botUsedWords.add(word);
+      const { rank } = lookupRank(word);
+      const prevBest = battle.peer.bestRank;
+      battle.peer.guessCount += 1;
+      if (battle.peer.bestRank == null || rank < battle.peer.bestRank) {
+        battle.peer.bestRank = rank;
+      }
+      renderBattleProgress();
+      if (prevBest != null && battle.peer.bestRank < prevBest) {
+        showPeerHint(
+          activeLang === 'zh'
+            ? `对手更接近了 · 当前最佳 #${battle.peer.bestRank}`
+            : `Opponent got closer · best #${battle.peer.bestRank}`
+        );
+      }
+      if (rank === 1) {
+        battle.peer.won = true;
+        finishGame('peer');
+      }
+    }
+
+    function startBattleBot() {
+      stopBattleBot();
+      const tick = () => {
+        botSubmitGuess();
+        if (!gameEnded) {
+          battle.botTimer = setTimeout(tick, randomInt(2800, 5500));
         }
-      });
-      guessInput.placeholder = t('placeholder');
-      updateLangButtons();
+      };
+      battle.botTimer = setTimeout(tick, randomInt(1500, 3000));
     }
 
-    /** 更新语言按钮高亮 */
-    function updateLangButtons() {
-      const isEn = activeLang === 'en';
-      langEnBtn.className =
-        'lang-btn rounded-full px-3 py-1.5 transition active:scale-95 ' +
-        (isEn ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600');
-      langZhBtn.className =
-        'lang-btn rounded-full px-3 py-1.5 transition active:scale-95 ' +
-        (!isEn ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600');
+    function stopBattleBot() {
+      clearTimeout(battle.botTimer);
+      battle.botTimer = null;
     }
 
-    // ========== 渲染猜测列表 ==========
+    // ========== 猜测列表 ==========
     function renderGuessList() {
       guessCountEl.textContent = String(guesses.length);
-
       if (guesses.length === 0) {
         guessList.innerHTML = '';
         const li = document.createElement('li');
-        li.id = 'empty-hint';
-        li.className =
-          'rounded-lg border border-dashed border-slate-300 py-8 text-center text-sm text-slate-400';
-        li.setAttribute('data-i18n', 'emptyHint');
+        li.className = 'rounded-lg border border-dashed border-slate-300 py-8 text-center text-sm text-slate-400';
         li.textContent = t('emptyHint');
         guessList.appendChild(li);
         return;
       }
-
       const sorted = [...guesses].sort((a, b) => a.rank - b.rank);
       guessList.innerHTML = '';
-
       sorted.forEach((g) => {
         const pct = barPercent(g.rank);
-        const colorClass = barColorClass(g.rank);
-        const isWin = g.rank === 1;
-
         const li = document.createElement('li');
         li.setAttribute('data-guess-id', String(g.id));
-        const isNewGuess = g.id === lastGuessId;
         li.className =
-          'relative overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-transform' +
-          (isWin ? ' win-row border-emerald-400' : '') +
-          (isNewGuess ? ' guess-row-highlight' : '');
-
+          'relative overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm' +
+          (g.rank === 1 ? ' win-row border-emerald-400' : '') +
+          (g.id === lastGuessId ? ' guess-row-highlight' : '');
         const bar = document.createElement('div');
-        bar.className =
-          `absolute inset-y-0 left-0 transition-all duration-500 ease-out ${colorClass}`;
+        bar.className = `absolute inset-y-0 left-0 transition-all duration-500 ${barColorClass(g.rank)}`;
         bar.style.width = `${pct}%`;
-
         const content = document.createElement('div');
-        content.className =
-          'relative z-10 flex items-center justify-between gap-2 px-3 py-2.5';
-
+        content.className = 'relative z-10 flex items-center justify-between gap-2 px-3 py-2.5';
         const wordSpan = document.createElement('span');
         wordSpan.className = 'truncate font-medium';
-        if (isWin) {
-          wordSpan.innerHTML =
-            `<i class="fa-solid fa-trophy mr-1 text-amber-500"></i>${escapeHtml(g.word)}`;
+        if (g.rank === 1) {
+          wordSpan.innerHTML = `<i class="fa-solid fa-trophy mr-1 text-amber-500"></i>${escapeHtml(g.word)}`;
         } else {
           wordSpan.textContent = g.word;
         }
-
         const rankSpan = document.createElement('span');
         rankSpan.className = 'shrink-0 font-mono text-sm tabular-nums text-slate-600';
         rankSpan.textContent = `#${g.rank}`;
-
         content.appendChild(wordSpan);
         content.appendChild(rankSpan);
         li.appendChild(bar);
         li.appendChild(content);
         guessList.appendChild(li);
-
-        // 触发宽度动画：下一帧再设目标宽度
-        requestAnimationFrame(() => {
-          bar.style.width = `${pct}%`;
-        });
       });
-
-      // 新猜测行滚入视野
       if (lastGuessId) {
-        const highlightEl = guessList.querySelector(
-          `[data-guess-id="${lastGuessId}"]`
-        );
-        highlightEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        guessList.querySelector(`[data-guess-id="${lastGuessId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
+      renderBattleProgress();
     }
 
-    /** HTML 转义，防止 XSS */
-    function escapeHtml(str) {
-      const div = document.createElement('div');
-      div.textContent = str;
-      return div.innerHTML;
+    // ========== 结算 ==========
+    function finishGame(winner) {
+      if (gameEnded) return;
+      gameEnded = true;
+      stopBattleBot();
+      guessInput.disabled = true;
+      document.getElementById('guess-btn').disabled = true;
+
+      const secret = getTargetWord();
+      const n = guesses.length;
+
+      if (winner === 'self') {
+        resultIcon.innerHTML = '<i class="fa-solid fa-trophy text-amber-400"></i>';
+        resultTitle.textContent = gameMode === 'battle' ? t('battleWinTitle') : t('winTitle');
+        resultTitle.className = 'mb-2 text-2xl font-bold text-emerald-600';
+        resultStats.textContent = gameMode === 'battle' ? t('battleWinStats', n) : t('winStats', n, 1);
+        startConfetti();
+      } else {
+        resultIcon.innerHTML = '<i class="fa-solid fa-flag text-rose-500"></i>';
+        resultTitle.textContent = t('battleLoseTitle');
+        resultTitle.className = 'mb-2 text-2xl font-bold text-rose-600';
+        resultStats.textContent = t('battleLoseStats', n);
+      }
+
+      resultSecret.textContent = `${t('secretLabel')}：${secret}`;
+      resultReplayBtn.textContent = gameMode === 'battle' ? t('replayBattle') : t('replaySolo');
+      resultOverlay.classList.remove('hidden');
+      resultOverlay.classList.add('flex');
+      resultOverlay.setAttribute('aria-hidden', 'false');
     }
 
-    // ========== 提交猜测 ==========
+    function hideResultOverlay() {
+      resultOverlay.classList.add('hidden');
+      resultOverlay.classList.remove('flex');
+      resultOverlay.setAttribute('aria-hidden', 'true');
+    }
+
+    function showSoloWinOverlay() {
+      finishGame('self');
+    }
+
+    // ========== 玩家猜测 ==========
     function submitGuess(raw) {
-      if (gameWon) return;
-
+      if (gameEnded) return;
       const word = normalize(raw);
       if (!word) return;
-
       if (!isValidInputForLang(word)) {
         showLangRequiredToast();
         return;
       }
-
       if (guesses.some((g) => g.word === word)) {
         showDuplicateToast();
         return;
@@ -528,41 +851,43 @@
       const { rank, isUnknown } = lookupRank(word);
       const guessId = Date.now();
       guesses.push({ word, rank, id: guessId });
-
       lastGuessId = guessId;
       clearTimeout(highlightTimer);
-      highlightTimer = setTimeout(() => {
-        lastGuessId = null;
-      }, 1000);
+      highlightTimer = setTimeout(() => { lastGuessId = null; }, 1000);
 
       renderGuessList();
       showGuessToast(word, rank, isUnknown);
       guessInput.value = '';
-      guessInput.focus();
+      if (!gameEnded) guessInput.focus();
 
       if (rank === 1) {
-        gameWon = true;
-        const best = Math.min(...guesses.map((g) => g.rank));
-        showWinOverlay(guesses.length, best);
-        startConfetti();
+        if (gameMode === 'battle') {
+          finishGame('self');
+        } else {
+          showSoloWinOverlay();
+        }
       }
     }
 
-    // ========== 胜利层 ==========
-    function showWinOverlay(total, best) {
-      winStatsEl.textContent = t('winStats', total, best);
-      winOverlay.classList.remove('hidden');
-      winOverlay.classList.add('flex');
-      winOverlay.setAttribute('aria-hidden', 'false');
+    function resetRound() {
+      pickRandomPuzzle();
+      guesses = [];
+      gameEnded = false;
+      lastGuessId = null;
+      guessInput.value = '';
+      guessInput.disabled = false;
+      document.getElementById('guess-btn').disabled = false;
+      hideResultOverlay();
+      stopConfetti();
+      clearTimeout(toastTimer);
+      clearTimeout(toastHideTimer);
+      clearTimeout(highlightTimer);
+      toastEl.classList.add('hidden');
+      peerHint.classList.add('hidden');
+      renderGuessList();
     }
 
-    function hideWinOverlay() {
-      winOverlay.classList.add('hidden');
-      winOverlay.classList.remove('flex');
-      winOverlay.setAttribute('aria-hidden', 'true');
-    }
-
-    // ========== Confetti 粒子系统 ==========
+    // ========== Confetti ==========
     function resizeConfettiCanvas() {
       confettiCanvas.width = window.innerWidth;
       confettiCanvas.height = window.innerHeight;
@@ -572,40 +897,25 @@
       stopConfetti();
       resizeConfettiCanvas();
       const colors = ['#f59e0b', '#10b981', '#6366f1', '#ec4899', '#3b82f6', '#ef4444'];
-      const count = 100;
-      confettiParticles = [];
-
-      for (let i = 0; i < count; i++) {
-        confettiParticles.push({
-          x: Math.random() * confettiCanvas.width,
-          y: Math.random() * confettiCanvas.height - confettiCanvas.height,
-          w: 6 + Math.random() * 6,
-          h: 4 + Math.random() * 4,
-          color: colors[Math.floor(Math.random() * colors.length)],
-          vx: (Math.random() - 0.5) * 4,
-          vy: 2 + Math.random() * 5,
-          rotation: Math.random() * 360,
-          vr: (Math.random() - 0.5) * 12,
-          opacity: 1,
-        });
-      }
-
+      confettiParticles = Array.from({ length: 100 }, () => ({
+        x: Math.random() * confettiCanvas.width,
+        y: Math.random() * confettiCanvas.height - confettiCanvas.height,
+        w: 6 + Math.random() * 6,
+        h: 4 + Math.random() * 4,
+        color: colors[randomInt(0, colors.length - 1)],
+        vx: (Math.random() - 0.5) * 4,
+        vy: 2 + Math.random() * 5,
+        rotation: Math.random() * 360,
+        vr: (Math.random() - 0.5) * 12,
+        opacity: 1,
+      }));
       let frame = 0;
-      const maxFrames = 180;
-
       function tick() {
         confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
         frame++;
-
         confettiParticles.forEach((p) => {
-          p.x += p.vx;
-          p.y += p.vy;
-          p.vy += 0.08;
-          p.rotation += p.vr;
-          if (frame > maxFrames * 0.6) {
-            p.opacity = Math.max(0, p.opacity - 0.015);
-          }
-
+          p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.rotation += p.vr;
+          if (frame > 108) p.opacity = Math.max(0, p.opacity - 0.015);
           confettiCtx.save();
           confettiCtx.globalAlpha = p.opacity;
           confettiCtx.translate(p.x, p.y);
@@ -614,75 +924,99 @@
           confettiCtx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
           confettiCtx.restore();
         });
-
-        if (frame < maxFrames) {
-          confettiAnimId = requestAnimationFrame(tick);
-        } else {
-          confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
-          confettiAnimId = null;
-        }
+        if (frame < 180) confettiAnimId = requestAnimationFrame(tick);
+        else { confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height); confettiAnimId = null; }
       }
-
       confettiAnimId = requestAnimationFrame(tick);
     }
 
     function stopConfetti() {
-      if (confettiAnimId) {
-        cancelAnimationFrame(confettiAnimId);
-        confettiAnimId = null;
-      }
+      if (confettiAnimId) cancelAnimationFrame(confettiAnimId);
+      confettiAnimId = null;
       confettiParticles = [];
       confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
     }
 
-    // ========== 重置本局 ==========
-    function resetGame() {
-      guesses = [];
-      gameWon = false;
-      guessInput.value = '';
-      hideWinOverlay();
-      stopConfetti();
-      clearTimeout(toastTimer);
-      clearTimeout(toastHideTimer);
-      clearTimeout(highlightTimer);
-      lastGuessId = null;
-      toastEl.classList.add('hidden');
-      toastEl.innerHTML = '';
-      renderGuessList();
+    // ========== 大厅语言切换 ==========
+    function updateLobbyLangButtons() {
+      const isEn = lobbyLang === 'en';
+      document.getElementById('lobby-lang-en').className =
+        'lobby-lang-btn flex-1 rounded-full py-2 transition ' + (isEn ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600');
+      document.getElementById('lobby-lang-zh').className =
+        'lobby-lang-btn flex-1 rounded-full py-2 transition ' + (!isEn ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600');
     }
 
-    /** 切换语言并重置 */
-    function setLanguage(lang) {
-      if (lang === activeLang) return;
-      activeLang = lang;
-      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
-      applyI18n();
-      resetGame();
-    }
+    // ========== 事件 ==========
+    document.getElementById('btn-solo').addEventListener('click', () => showScreen('soloLang'));
+    document.getElementById('btn-battle').addEventListener('click', () => {
+      resetInvitedFriends();
+      btnInviteFriends.innerHTML = '<i class="fa-solid fa-user-plus"></i> 邀请好友';
+      updateLobbyLangButtons();
+      updateStartBattleButton();
+      showScreen('lobby');
+    });
 
-    // ========== 事件绑定 ==========
+    btnInviteFriends.addEventListener('click', inviteFriendsDemo);
+
+    document.querySelectorAll('.nav-back').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.target === 'home') goHome();
+      });
+    });
+
+    document.querySelectorAll('.solo-lang-pick').forEach((btn) => {
+      btn.addEventListener('click', () => startSoloGame(btn.dataset.lang));
+    });
+
+    document.getElementById('lobby-lang-en').addEventListener('click', () => {
+      lobbyLang = 'en';
+      updateLobbyLangButtons();
+    });
+    document.getElementById('lobby-lang-zh').addEventListener('click', () => {
+      lobbyLang = 'zh';
+      updateLobbyLangButtons();
+    });
+
+    document.getElementById('btn-start-battle').addEventListener('click', () => {
+      startBattleGame(lobbyLang);
+    });
+
+    document.getElementById('game-back-btn').addEventListener('click', () => {
+      if (gameEnded || confirm(activeLang === 'zh' ? '确定退出本局？' : 'Leave this game?')) {
+        stopBattleBot();
+        goHome();
+      }
+    });
+
     guessForm.addEventListener('submit', (e) => {
       e.preventDefault();
       submitGuess(guessInput.value);
     });
 
-    playAgainBtn.addEventListener('click', () => {
-      resetGame();
-      guessInput.focus();
+    resultReplayBtn.addEventListener('click', () => {
+      hideResultOverlay();
+      if (gameMode === 'battle') {
+        resetRound();
+        resetBattlePeer();
+        startBattleBot();
+        guessInput.focus();
+      } else {
+        resetRound();
+        guessInput.focus();
+      }
     });
 
-    langEnBtn.addEventListener('click', () => setLanguage('en'));
-    langZhBtn.addEventListener('click', () => setLanguage('zh'));
+    resultHomeBtn.addEventListener('click', goHome);
 
     window.addEventListener('resize', () => {
       if (confettiAnimId) resizeConfettiCanvas();
     });
 
     // ========== 初始化 ==========
-    applyI18n();
-    renderGuessList();
+    updateLobbyLangButtons();
+    updateStartBattleButton();
     resizeConfettiCanvas();
-    guessInput.focus();
+    showScreen('home');
   </script>
 </body>
 </html>
